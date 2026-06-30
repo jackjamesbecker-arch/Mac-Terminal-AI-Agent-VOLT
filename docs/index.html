@@ -737,19 +737,48 @@ async function realWebSearch(query) {
   }
 }
 
-// ===== REAL DATA: STOCKS =====
+// ===== REAL DATA: PASSWORD GENERATOR =====
+function generateSecurePassword(length = 20) {
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*";
+  const array = new Uint32Array(length);
+  crypto.getRandomValues(array);
+  let password = "";
+  for (let i = 0; i < length; i++) {
+    password += chars[array[i] % chars.length];
+  }
+  return password;
+}
+
+// ===== REAL DATA: STOCKS (via CORS proxy since Yahoo blocks direct browser calls) =====
 async function realStockPrice(symbol) {
+  const sym = symbol.toUpperCase();
   try {
-    const res = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${symbol.toUpperCase()}?interval=1d&range=1d`);
+    const url = `https://corsproxy.io/?url=${encodeURIComponent(`https://query1.finance.yahoo.com/v8/finance/chart/${sym}?interval=1d&range=1d`)}`;
+    const res = await fetch(url);
     const data = await res.json();
     const meta = data.chart.result[0].meta;
     const price = meta.regularMarketPrice;
     const prev = meta.chartPreviousClose || price;
     const change = ((price - prev) / prev * 100);
     const arrow = change >= 0 ? '▲' : '▼';
-    return `${symbol.toUpperCase()}: $${price.toFixed(2)} ${arrow} ${Math.abs(change).toFixed(2)}%`;
+    return `${sym}: $${price.toFixed(2)} ${arrow} ${Math.abs(change).toFixed(2)}%`;
   } catch (e) {
-    return `Could not fetch ${symbol}: ${e.message}`;
+    // Fallback: try CoinGecko for crypto symbols
+    const cryptoMap = { 'BTC': 'bitcoin', 'BTC-USD': 'bitcoin', 'ETH': 'ethereum', 'ETH-USD': 'ethereum', 'SOL': 'solana', 'DOGE': 'dogecoin' };
+    const coinId = cryptoMap[sym];
+    if (coinId) {
+      try {
+        const res2 = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${coinId}&vs_currencies=usd&include_24hr_change=true`);
+        const data2 = await res2.json();
+        const price = data2[coinId].usd;
+        const change = data2[coinId].usd_24h_change || 0;
+        const arrow = change >= 0 ? '▲' : '▼';
+        return `${sym}: $${price.toLocaleString()} ${arrow} ${Math.abs(change).toFixed(2)}%`;
+      } catch (e2) {
+        return `Could not fetch ${sym}: ${e2.message}`;
+      }
+    }
+    return `Could not fetch ${sym}: ${e.message}`;
   }
 }
 
@@ -815,6 +844,20 @@ const WEB_TOOLS = [
         required: ["title", "body"]
       }
     }
+  },
+  {
+    type: "function",
+    function: {
+      name: "generate_password",
+      description: "Generate a cryptographically secure random password.",
+      parameters: {
+        type: "object",
+        properties: {
+          length: { type: "integer", description: "Password length, defaults to 20" }
+        },
+        required: []
+      }
+    }
   }
 ];
 
@@ -825,6 +868,10 @@ async function dispatchWebTool(name, args) {
   if (name === 'send_notification') {
     sendNotification(args.title, args.body);
     return `✓ Notification sent: ${args.title}`;
+  }
+  if (name === 'generate_password') {
+    const pw = generateSecurePassword(args.length || 20);
+    return `Generated password: ${pw}`;
   }
   return "Unknown tool.";
 }
@@ -850,7 +897,7 @@ Personality:
 - Detect sarcasm and match energy with dry wit
 - Never say "As you wish, Sir" outside of APEX Protocol
 
-You have real tools: get_weather (uses GPS), web_search (real results), get_stock (real prices), send_notification (real push notification). Use them whenever relevant — never guess or fake this data when a tool can get the real answer. You don't have access to Mac-only features like iMessage, Apple Music control, or shell commands in this web version — be upfront if those are needed and suggest the desktop Volt agent.${memStr}`;
+You have real tools: get_weather (uses GPS), web_search (real results), get_stock (real prices), send_notification (real push notification), generate_password (cryptographically secure). Use them whenever relevant — never guess or fake this data when a tool can get the real answer. You don't have access to Mac-only features like iMessage, Apple Music control, or shell commands in this web version — be upfront if those are needed and suggest the desktop Volt agent.${memStr}`;
 
   let convo = [{ role: 'system', content: systemPrompt }, ...messages];
 
